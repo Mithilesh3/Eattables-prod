@@ -1,0 +1,17 @@
+{
+  "name": "@eattables/rules-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Firestore and Storage Security Rules tests. Requires the Firebase Emulator Suite (needs a JRE).",
+  "type": "module",
+  "scripts": {
+    "test": "firebase emulators:exec --project=eattables-rules-test --only firestore,storage \"vitest run\"",
+    "test:nohost": "vitest run"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.4.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

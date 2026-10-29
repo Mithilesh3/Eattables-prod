@@ -1,0 +1,10 @@
+# Security Rules use a CEL-like syntax that Prettier cannot parse.
+# They are reviewed by hand and covered by firebase/rules-tests.
+*.rules
+
+node_modules/
+.next/
+dist/
+coverage/
+package-lock.json
+*.log

@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "Copy to .firebaserc and replace the placeholders once the Firebase projects exist.",
+    ".firebaserc is git-ignored so that a developer's local project aliases are never",
+    "committed, and so this repo never claims ownership of a project that has not been",
+    "created yet. No Firebase projects exist as of Phase 1.",
+    "",
+    "Emulator work does NOT need this file: the npm scripts pass --project=eattables-local."
+  ],
+  "projects": {
+    "dev": "REPLACE_WITH_DEV_PROJECT_ID",
+    "prod": "REPLACE_WITH_PROD_PROJECT_ID"
+  }
+}

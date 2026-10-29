@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// =============================================================================
+// Eattables — Cloud Storage Security Rules (MVP, architecture v2)
+//
+// Default-deny. Two zones:
+//   PUBLIC  — product/category media: world-readable, staff-writable, type+size capped.
+//   PRIVATE — invoices and any document containing personal data: NOT readable by
+//             any client. Served only through short-lived signed URLs minted by a
+//             Cloud Function after an ownership check. A leaked or guessed invoice
+//             URL would expose names, addresses, phone numbers and purchase history.
+// =============================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return signedIn() ? request.auth.token.get('role', 'customer') : '';
+    }
+
+    function canManageCatalog() {
+      return role() in ['catalog_manager', 'admin', 'superadmin'];
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|avif)');
+    }
+
+    function underBytes(n) {
+      return request.resource.size < n;
+    }
+
+    // ------------------------------------------------------------ public media
+    match /products/{productId}/{fileName} {
+      allow read: if true;
+      allow write: if canManageCatalog() && isImage() && underBytes(5 * 1024 * 1024);
+      allow delete: if canManageCatalog();
+    }
+
+    match /categories/{categoryId}/{fileName} {
+      allow read: if true;
+      allow write: if canManageCatalog() && isImage() && underBytes(2 * 1024 * 1024);
+      allow delete: if canManageCatalog();
+    }
+
+    // ---------------------------------------------------------------- private
+    // Written by Cloud Functions (Admin SDK bypasses these rules), read only via
+    // signed URLs. No direct client access, including by the invoice's owner.
+    match /invoices/{userId}/{fileName} {
+      allow read, write, delete: if false;
+    }
+
+    // ------------------------------------------------------------ DEFAULT DENY
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Least privilege: CI only needs to read the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Secret scanning runs first and independently: if a credential has been
+  # committed, nothing else about this build matters.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so a secret committed earlier and later "removed" is
+          # still detected — it remains in the git objects and is still leaked.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fail if a service-account key is tracked
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -Ei '(service[-_]?account|firebase-adminsdk|\.p12$|\.pem$|\.key$)' ; then
+            echo "::error::A credential-shaped file is tracked in git."
+            exit 1
+          fi
+          echo "No credential-shaped files tracked."
+
+      - name: Fail if a real .env file is tracked
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' ; then
+            echo "::error::A .env file is tracked. Only .env.example may be committed."
+            exit 1
+          fi
+          echo "No .env files tracked."
+
+  quality:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build shared package
+        run: npm run build --workspace=@eattables/shared
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: No privileged credentials in browser code
+        run: npm run check:client-env
+
+      - name: Build web
+        run: npm run build --workspace=@eattables/web
+
+      - name: Build functions
+        run: npm run build --workspace=@eattables/functions
+
+      - name: Fail if a secret leaked into the client bundle
+        run: |
+          set -euo pipefail
+          if grep -rIl --include='*.js' -E 'BEGIN [A-Z ]*PRIVATE KEY|"type"[[:space:]]*:[[:space:]]*"service_account"' apps/web/.next/static 2>/dev/null; then
+            echo "::error::Key material found in the client bundle."
+            exit 1
+          fi
+          echo "Client bundle clean."
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build --workspace=@eattables/shared
+      - run: npm test
+
+  rules-tests:
+    name: Security Rules tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # The Firestore and Storage emulators are JVM processes.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - run: npm ci
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Run Firestore and Storage rules tests against the emulators
+        run: npm run test:rules

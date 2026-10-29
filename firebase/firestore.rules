@@ -1,0 +1,231 @@
+rules_version = '2';
+
+// =============================================================================
+// Eattables — Firestore Security Rules (MVP, architecture v2)
+//
+// POSTURE: default-deny. Almost every commerce collection is `allow write: if false`
+// for clients. Those writes happen only in Cloud Functions via the Admin SDK, which
+// bypasses these rules. This is deliberate: it makes "a customer cannot change a
+// price / total / payment status / stock level / order status" true *structurally*,
+// so no bug in rules logic can expose it.
+//
+// AUTHORIZATION SOURCE: custom claims on the ID token (request.auth.token.role).
+// NEVER read users/{uid}.role here — that field is a display mirror only. Reading it
+// in rules would be both a privilege-escalation path and a billed document read on
+// every rule evaluation.
+//
+// Collections not listed below are denied by the final catch-all.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- helpers
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function role() {
+      return signedIn() ? request.auth.token.get('role', 'customer') : '';
+    }
+
+    function hasPerm(p) {
+      return signedIn() && p in request.auth.token.get('perms', []);
+    }
+
+    function isStaff() {
+      return role() in ['catalog_manager', 'ops', 'admin', 'superadmin'];
+    }
+
+    function isAdmin() {
+      return role() in ['admin', 'superadmin'];
+    }
+
+    // An account suspended by support/fraud review loses access immediately,
+    // rather than waiting up to an hour for its ID token to expire.
+    function notSuspended() {
+      return request.auth.token.get('suspended', false) == false;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && uid() == userId && notSuspended();
+    }
+
+    function incomingKeysLimitedTo(allowed) {
+      return request.resource.data.keys().hasOnly(allowed);
+    }
+
+    function unchanged(field) {
+      return !(field in request.resource.data)
+        ? !(field in resource.data)
+        : (field in resource.data) && request.resource.data[field] == resource.data[field];
+    }
+
+    // ------------------------------------------------------- public catalogue
+    // Read-only to the world. All writes are Cloud Functions only, which is what
+    // makes client-side price tampering impossible at the data layer.
+    match /products/{productId} {
+      allow read: if resource.data.status == 'active' || isStaff();
+      allow write: if false;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if resource.data.isActive == true || isStaff();
+      allow write: if false;
+    }
+
+    // Denormalised listing + search payload. Public by design (so is the website).
+    match /catalogIndex/{shardId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // --------------------------------------------------------------- user data
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isStaff();
+
+      // Created by a Cloud Function on signup, never by the client.
+      allow create: if false;
+      allow delete: if false;
+
+      // The owner may edit a narrow allowlist of profile fields. Every field that
+      // confers privilege or money is pinned with unchanged().
+      allow update: if isOwner(userId)
+        && incomingKeysLimitedTo([
+             'uid', 'phone', 'email', 'displayName', 'phoneVerified', 'emailVerified',
+             'role', 'accountType', 'status', 'defaultAddressId', 'marketingConsent',
+             'createdAt', 'updatedAt'
+           ])
+        && unchanged('role')
+        && unchanged('status')
+        && unchanged('accountType')
+        && unchanged('phone')
+        && unchanged('phoneVerified')
+        && unchanged('emailVerified')
+        && unchanged('createdAt')
+        && (!('displayName' in request.resource.data)
+            || (request.resource.data.displayName is string
+                && request.resource.data.displayName.size() <= 100));
+
+      // Addresses are only ever used in the context of their owner, which keeps
+      // these rules simple and safe.
+      match /addresses/{addressId} {
+        allow read, delete: if isOwner(userId);
+
+        allow create, update: if isOwner(userId)
+          && incomingKeysLimitedTo([
+               'addressId', 'label', 'recipientName', 'recipientPhone',
+               'line1', 'line2', 'landmark', 'city', 'state', 'pincode',
+               'country', 'isDefault', 'serviceable', 'createdAt', 'updatedAt'
+             ])
+          && request.resource.data.recipientName is string
+          && request.resource.data.recipientName.size() > 0
+          && request.resource.data.recipientName.size() <= 100
+          && request.resource.data.recipientPhone is string
+          && request.resource.data.recipientPhone.matches('^[+]?[0-9]{10,15}$')
+          && request.resource.data.line1 is string
+          && request.resource.data.line1.size() > 0
+          && request.resource.data.line1.size() <= 200
+          && request.resource.data.city is string
+          && request.resource.data.city.size() <= 100
+          && request.resource.data.pincode is string
+          && request.resource.data.pincode.matches('^[1-9][0-9]{5}$')
+          && request.resource.data.country == 'IN'
+          // Serviceability is decided by the server, not claimed by the client.
+          && request.resource.data.serviceable == false;
+      }
+    }
+
+    // ------------------------------------------------------------------- cart
+    // The cart stores INTENT ONLY: {sku, qty}. It must never carry money.
+    // Blocking the money keys outright means a tampered client can at worst show
+    // itself a wrong number; checkout recomputes everything server-side anyway.
+    match /carts/{userId} {
+      allow read, delete: if isOwner(userId);
+
+      allow create, update: if isOwner(userId)
+        && incomingKeysLimitedTo(['userId', 'items', 'updatedAt', 'createdAt'])
+        && request.resource.data.userId == userId
+        && request.resource.data.items is list
+        && request.resource.data.items.size() <= 100
+        && !request.resource.data.keys().hasAny([
+             'totals', 'grandTotal', 'unitPrice', 'price', 'discount',
+             'couponDiscount', 'tax', 'deliveryCharge', 'subtotal'
+           ]);
+    }
+
+    // ----------------------------------------------------------------- orders
+    // Owner may read their own order. NOBODY writes from a client — not even to
+    // cancel. Cancellation is a callable that validates eligibility server-side.
+    match /orders/{orderId} {
+      allow read: if (signedIn() && resource.data.userId == uid()) || isStaff();
+      allow write: if false;
+
+      // Append-only status-transition log backing customer-visible tracking.
+      match /events/{eventId} {
+        allow read: if isStaff()
+          || (signedIn()
+              && get(/databases/$(database)/documents/orders/$(orderId)).data.userId == uid());
+        allow write: if false;
+      }
+    }
+
+    // -------------------------------------- inventory, payments, audit, config
+    // No client write path anywhere in this block. Exact stock levels are not
+    // client-readable either: they are commercially sensitive and invite probing.
+    match /inventory/{sku} {
+      allow read: if hasPerm('inventory:read') || isStaff();
+      allow write: if false;
+    }
+
+    match /inventoryLedger/{entryId} {
+      allow read: if hasPerm('inventory:read') || isStaff();
+      allow write: if false;
+    }
+
+    match /stockReservations/{reservationId} {
+      allow read, write: if false;
+    }
+
+    match /paymentIntents/{intentId} {
+      allow read, write: if false;
+    }
+
+    // Document ID is the payment provider's own event ID — this collection is the
+    // webhook idempotency mechanism. Never client-accessible.
+    match /paymentEvents/{providerEventId} {
+      allow read, write: if false;
+    }
+
+    match /idempotencyKeys/{key} {
+      allow read, write: if false;
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if false;
+    }
+
+    match /adminAuditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Only the non-sensitive operational config is public (serviceable pincodes,
+    // store open/closed, feature flags). Tax and delivery rules are not.
+    match /config/{configId} {
+      allow read: if configId in ['serviceability', 'storeStatus', 'featureFlags'] || isStaff();
+      allow write: if false;
+    }
+
+    // --------------------------------------------------------- DEFAULT DENY
+    // Anything not explicitly matched above is denied, including every collection
+    // deferred to a later phase (coupons, subscriptions, rewardLedger, b2b, ...).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

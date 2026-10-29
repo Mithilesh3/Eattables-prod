@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+/*
+ * PROVISIONAL design tokens.
+ *
+ * These values are approximated from the pitch deck's slides so that Phase 1 has
+ * something coherent to render. They are NOT the official brand palette — the
+ * logo files, exact hex values and licensed fonts are still an open question with
+ * the business owner, and these tokens must be replaced before Phase 2 styling
+ * begins. Defining them in one place means that replacement is a single edit.
+ */
+@theme {
+  --color-brand-50: #f4f3f8;
+  --color-brand-100: #e4e1ee;
+  --color-brand-500: #4a3d7a;
+  --color-brand-700: #332a58;
+  --color-brand-900: #2b2150;
+
+  --color-accent-400: #e8a765;
+  --color-accent-500: #d9843a;
+  --color-accent-600: #b86a28;
+
+  --color-cream-50: #fdfbf7;
+  --color-cream-100: #f7f2e8;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-cream-50);
+  color: var(--color-brand-900);
+  font-family: var(--font-sans);
+}
+
+/* Visible keyboard focus is an accessibility requirement, not a style choice. */
+:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

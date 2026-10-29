@@ -1,0 +1,5 @@
+{
+  "_comment": "Composite indexes are added as the queries that need them are written (Phase 2+). Single-field indexes are automatic. Keep this file in version control so indexes are reviewed and deployed through CI, never hand-created in the console.",
+  "indexes": [],
+  "fieldOverrides": []
+}

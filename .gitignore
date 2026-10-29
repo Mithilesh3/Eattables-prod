@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# Secrets — NEVER commit these.
+# Firebase *web* config (NEXT_PUBLIC_*) is public by design and may live in
+# .env.example, but real .env files are ignored regardless.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*-service-account*.json
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
+gha-creds-*.json
+.secrets/
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Test / coverage
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# Firebase local state
+# .firebaserc holds per-developer project aliases — see .firebaserc.example
+.firebaserc
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+database-debug.log
+pubsub-debug.log
+ui-debug.log
+storage-debug.log
+emulator-data/
+
+# Caches
+.turbo/
+.cache/
+.eslintcache
+.vercel/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

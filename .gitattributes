@@ -1,0 +1,18 @@
+# Normalise line endings to LF in the repository and in working copies.
+# Prettier enforces LF; without this, a Windows checkout would rewrite files to
+# CRLF and fail the CI format check on a clone that nobody had edited.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Keep diffs of the lockfile out of review noise, but still track it.
+package-lock.json -diff linguist-generated=true
