@@ -69,6 +69,11 @@ beforeEach(async () => {
       reserved: 0,
       available: 10,
     });
+    await setDoc(doc(db, 'inventoryLedger/led1'), {
+      sku: 'EAT-DF-ALM-500G',
+      type: 'receipt',
+      qtyDelta: 10,
+    });
     await setDoc(doc(db, 'paymentIntents/pi_1'), { orderId: 'o_alice', amount: 250000 });
     await setDoc(doc(db, 'paymentEvents/evt_1'), { processingStatus: 'processed' });
     await setDoc(doc(db, 'adminAuditLogs/log1'), { action: 'price_change' });
@@ -84,6 +89,10 @@ const bob = () => testEnv.authenticatedContext(BOB, claims.customer).firestore()
 const opsUser = () => testEnv.authenticatedContext('ops_uid', claims.ops).firestore();
 const adminUser = () =>
   testEnv.authenticatedContext('admin_uid', claims.admin).firestore();
+const catalogManager = () =>
+  testEnv.authenticatedContext('cm_uid', claims.catalogManager).firestore();
+const superadminUser = () =>
+  testEnv.authenticatedContext('sa_uid', claims.superadmin).firestore();
 
 // ---------------------------------------------------------------- catalogue
 describe('products', () => {
@@ -425,6 +434,85 @@ describe('config', () => {
   it('blocks config writes', async () => {
     await assertFails(
       setDoc(doc(adminUser(), 'config/serviceability'), { pincodes: [] })
+    );
+  });
+});
+
+// ------------------------------------------------- separation of duty (roles)
+// Regression cover for the Phase 1 review finding C1: order reads were gated on
+// the coarse isStaff(), which granted catalog_manager access to every customer's
+// order — including the embedded address, phone and email. Order access now
+// requires the explicit 'orders:read' permission.
+describe('separation of duty', () => {
+  it('BLOCKS catalog_manager from reading customer orders', async () => {
+    await assertFails(getDoc(doc(catalogManager(), 'orders/o_alice')));
+  });
+
+  it('BLOCKS catalog_manager from reading order events', async () => {
+    // Events leak status history for an order the role may not see at all.
+    await assertFails(getDoc(doc(catalogManager(), 'orders/o_alice/events/e1')));
+  });
+
+  it('lets ops and admin read orders — they hold orders:read', async () => {
+    await assertSucceeds(getDoc(doc(opsUser(), 'orders/o_alice')));
+    await assertSucceeds(getDoc(doc(adminUser(), 'orders/o_alice')));
+    await assertSucceeds(getDoc(doc(opsUser(), 'orders/o_alice/events/e1')));
+  });
+
+  it('lets superadmin through via the * permission wildcard', async () => {
+    // hasPerm() must honour '*', matching requirePerm() in the function guards.
+    await assertSucceeds(getDoc(doc(superadminUser(), 'orders/o_alice')));
+    await assertSucceeds(getDoc(doc(superadminUser(), 'inventory/EAT-DF-ALM-500G')));
+  });
+
+  it('still BLOCKS every staff role from writing orders', async () => {
+    for (const ctx of [catalogManager(), opsUser(), adminUser(), superadminUser()]) {
+      await assertFails(updateDoc(doc(ctx, 'orders/o_alice'), { status: 'SHIPPED' }));
+    }
+  });
+
+  it('grants inventory reads by permission, not by staff status', async () => {
+    // catalog_manager and ops both legitimately manage stock.
+    await assertSucceeds(getDoc(doc(catalogManager(), 'inventory/EAT-DF-ALM-500G')));
+    await assertSucceeds(getDoc(doc(opsUser(), 'inventory/EAT-DF-ALM-500G')));
+    await assertSucceeds(getDoc(doc(catalogManager(), 'inventoryLedger/led1')));
+  });
+
+  it('BLOCKS a staff role without inventory:read from reading stock', async () => {
+    // Proves the permission is load-bearing rather than vestigial: this role is
+    // staff, but holds no inventory permission.
+    const supportish = testEnv
+      .authenticatedContext('sup_uid', { role: 'ops', perms: ['orders:read'] })
+      .firestore();
+    await assertFails(getDoc(doc(supportish, 'inventory/EAT-DF-ALM-500G')));
+    await assertFails(getDoc(doc(supportish, 'inventoryLedger/led1')));
+  });
+
+  it('BLOCKS non-admin staff from reading commercially sensitive config', async () => {
+    // Tax rates and delivery pricing were previously readable by any staff role.
+    for (const ctx of [catalogManager(), opsUser()]) {
+      await assertFails(getDoc(doc(ctx, 'config/taxRates')));
+    }
+    await assertSucceeds(getDoc(doc(adminUser(), 'config/taxRates')));
+  });
+
+  it('BLOCKS a suspended staff account despite valid permissions', async () => {
+    const suspendedOps = testEnv
+      .authenticatedContext('sops_uid', {
+        role: 'ops',
+        perms: ['orders:read', 'inventory:read'],
+        suspended: true,
+      })
+      .firestore();
+    await assertFails(getDoc(doc(suspendedOps, 'orders/o_alice')));
+    await assertFails(getDoc(doc(suspendedOps, 'inventory/EAT-DF-ALM-500G')));
+  });
+
+  it('BLOCKS a forged perms claim from a customer', async () => {
+    // Claims are set only by a superadmin callable; this proves the rule reads
+    // the token rather than anything the user controls in Firestore.
+    await assertFails(
+      updateDoc(doc(alice(), 'users', ALICE), { perms: ['orders:read'] })
     );
   });
 });

@@ -33,10 +33,21 @@ service cloud.firestore {
       return signedIn() ? request.auth.token.get('role', 'customer') : '';
     }
 
+    // Fine-grained authorization. The '*' wildcard is held only by superadmin and
+    // mirrors requirePerm() in functions/src/lib/guards.ts, so a permission means
+    // the same thing on both sides of the system.
+    //
+    // Prefer hasPerm() over isStaff() for anything carrying customer data or
+    // money: isStaff() is a coarse "is an employee" test and grants every staff
+    // role, which defeats separation of duty.
     function hasPerm(p) {
-      return signedIn() && p in request.auth.token.get('perms', []);
+      return signedIn()
+        && notSuspended()
+        && request.auth.token.get('perms', []).hasAny([p, '*']);
     }
 
+    // Coarse check. Acceptable only for non-sensitive internal data such as
+    // unpublished catalogue entries, which every staff role legitimately sees.
     function isStaff() {
       return role() in ['catalog_manager', 'ops', 'admin', 'superadmin'];
     }
@@ -141,9 +152,21 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------- cart
-    // The cart stores INTENT ONLY: {sku, qty}. It must never carry money.
-    // Blocking the money keys outright means a tampered client can at worst show
-    // itself a wrong number; checkout recomputes everything server-side anyway.
+    // The cart is intended to store INTENT ONLY: {sku, qty}.
+    //
+    // SCOPE OF THIS RULE — read carefully before relying on it:
+    //   * The money-key rejection below applies to TOP-LEVEL cart fields only.
+    //   * Fields nested inside items[] are NOT validated. Firestore rules cannot
+    //     iterate array elements, so a client CAN write
+    //     items: [{sku, qty, unitPrice: 1}] and it will be accepted here.
+    //   * qty is NOT bounded here either. The 1..99 bound exists in the shared
+    //     Zod schema and is enforced server-side, not by this rule.
+    //
+    // Neither gap is exploitable: checkout ignores every cart field except sku
+    // and qty, and re-reads the price from products/{id} server-side. The rule is
+    // defence in depth, not the control that protects pricing. Treat the server
+    // recomputation in checkout.placeOrder as the actual guarantee.
+    // See docs/SECURITY.md §4 "Known limits of the cart rule".
     match /carts/{userId} {
       allow read, delete: if isOwner(userId);
 
@@ -161,14 +184,21 @@ service cloud.firestore {
     // ----------------------------------------------------------------- orders
     // Owner may read their own order. NOBODY writes from a client — not even to
     // cancel. Cancellation is a callable that validates eligibility server-side.
+    //
+    // Staff access requires the explicit 'orders:read' permission, NOT isStaff().
+    // An order embeds shippingAddressSnapshot, userPhone and userEmail, so a
+    // coarse staff check would hand full customer PII to catalog_manager, which
+    // has no business reason to see it. See docs/SECURITY.md §2.
     match /orders/{orderId} {
-      allow read: if (signedIn() && resource.data.userId == uid()) || isStaff();
+      allow read: if (signedIn() && notSuspended() && resource.data.userId == uid())
+        || hasPerm('orders:read');
       allow write: if false;
 
       // Append-only status-transition log backing customer-visible tracking.
       match /events/{eventId} {
-        allow read: if isStaff()
+        allow read: if hasPerm('orders:read')
           || (signedIn()
+              && notSuspended()
               && get(/databases/$(database)/documents/orders/$(orderId)).data.userId == uid());
         allow write: if false;
       }
@@ -177,13 +207,15 @@ service cloud.firestore {
     // -------------------------------------- inventory, payments, audit, config
     // No client write path anywhere in this block. Exact stock levels are not
     // client-readable either: they are commercially sensitive and invite probing.
+    // 'inventory:read' alone — the previous `|| isStaff()` made the permission
+    // vestigial by granting every staff role regardless of its permission set.
     match /inventory/{sku} {
-      allow read: if hasPerm('inventory:read') || isStaff();
+      allow read: if hasPerm('inventory:read');
       allow write: if false;
     }
 
     match /inventoryLedger/{entryId} {
-      allow read: if hasPerm('inventory:read') || isStaff();
+      allow read: if hasPerm('inventory:read');
       allow write: if false;
     }
 
@@ -215,9 +247,15 @@ service cloud.firestore {
     }
 
     // Only the non-sensitive operational config is public (serviceable pincodes,
-    // store open/closed, feature flags). Tax and delivery rules are not.
+    // store open/closed, feature flags).
+    //
+    // Everything else — tax rates, delivery pricing rules — is commercially
+    // sensitive and is restricted to admins. It was previously readable by any
+    // staff role via isStaff(). Clients never need these values: taxes and
+    // delivery charges are computed server-side during checkout.
     match /config/{configId} {
-      allow read: if configId in ['serviceability', 'storeStatus', 'featureFlags'] || isStaff();
+      allow read: if configId in ['serviceability', 'storeStatus', 'featureFlags']
+        || isAdmin();
       allow write: if false;
     }
 

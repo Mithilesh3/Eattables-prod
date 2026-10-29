@@ -40,13 +40,29 @@ Roles, with deliberate separation of duty:
 | Role              | May do                             | May **not** do                       |
 | ----------------- | ---------------------------------- | ------------------------------------ |
 | `customer`        | Own cart, addresses, orders (read) | Anything else                        |
-| `catalog_manager` | Products, media, stock             | Touch orders                         |
+| `catalog_manager` | Products, media, stock             | Read or write orders                 |
 | `ops`             | Orders, fulfilment, stock          | Edit prices                          |
 | `admin`           | The above + customers + audit      | Grant roles                          |
 | `superadmin`      | Grant roles, destructive ops       | — (MFA required, minimum two humans) |
 
+**Enforcement is by permission, not by employment status.** Rules gate sensitive
+collections on `hasPerm('orders:read')` / `hasPerm('inventory:read')`, never on the
+coarse `isStaff()`. This matters concretely: an order embeds
+`shippingAddressSnapshot`, `userPhone` and `userEmail`, so gating order reads on
+"is an employee" would hand full customer PII to `catalog_manager`. `isStaff()`
+survives only where every staff role legitimately needs access — reading
+unpublished catalogue entries.
+
+`hasPerm()` honours the `*` wildcard held by `superadmin`, matching `requirePerm()`
+in `functions/src/lib/guards.ts`, so a permission means the same thing on both
+sides of the system.
+
 A `suspended: true` claim denies access immediately, in both rules and the function
 guards, rather than waiting up to an hour for the ID token to expire.
+
+Commercially sensitive configuration (`config/taxRates`, delivery pricing) is
+admin-only. Clients never need these values — taxes and delivery charges are
+computed server-side at checkout.
 
 ## 3. Data access
 
@@ -61,8 +77,34 @@ The only client-writable paths are:
   `phone` and verification flags pinned by `unchanged()`.
 - `users/{uid}/addresses/{id}` — shape-validated; `serviceable` must be `false`
   (serviceability is a server decision).
-- `carts/{uid}` — **identifiers and quantity only**. Any money-bearing key is
-  rejected outright.
+- `carts/{uid}` — intended to hold **identifiers and quantity only**. See the
+  limits below before relying on this.
+
+### Known limits of the cart rule
+
+An earlier version of this document and the Phase 1 commit message stated that the
+cart rule rejects money-bearing keys. That is true only of **top-level** fields.
+Stated accurately:
+
+| Claim                                                                              | Status                       |
+| ---------------------------------------------------------------------------------- | ---------------------------- |
+| Top-level money keys (`totals`, `grandTotal`, `unitPrice`, `discount`, …) rejected | ✅ enforced and tested       |
+| Top-level key allowlist (`userId`, `items`, `createdAt`, `updatedAt`)              | ✅ enforced and tested       |
+| Cart item count capped at 100                                                      | ✅ enforced and tested       |
+| Money fields **nested inside `items[]`** rejected                                  | ❌ **not enforced**          |
+| `qty` bounded to 1–99                                                              | ❌ **not enforced in rules** |
+
+Firestore Security Rules cannot iterate array elements, so a client can write
+`items: [{sku, qty, unitPrice: 1}]` or `qty: 1000000` and the rule will accept it.
+
+**Neither gap is exploitable.** `checkout.placeOrder` ignores every cart field
+except `sku` and `qty`, re-reads the price from `products/{id}`, and validates `qty`
+against the shared Zod schema (1–99) and `LIMITS.maxQtyPerLine`. The cart rule is
+defence in depth; the server-side recomputation at checkout is the actual control.
+
+If stronger cart-level enforcement is ever wanted, it requires either a fixed-shape
+map keyed by SKU instead of an array, or a callable that owns all cart mutations.
+Both are deferred — neither is needed while checkout recomputes from source.
 
 `firebase/storage.rules` is likewise default-deny: public product media (staff-write,
 type and size capped) and private invoices (no client access at all).
@@ -121,21 +163,44 @@ Stated plainly so none of these is mistaken for done:
 - No rate limiting, no MFA enforcement, no backups, no monitoring. All are
   Phase 3–5 items and all are release blockers.
 - Transitive advisories remain in the dependency tree (see §8).
+- The cart rule validates top-level keys only; nested item fields and `qty` are
+  enforced server-side, not by rules (see §3).
+- ESLint is configured for `apps/web` only. `functions/`, `packages/shared` and
+  the rules tests are typechecked but not linted.
+- The CI workflow has never executed — nothing has been pushed. gitleaks, the
+  credential-tracking checks and the client-bundle scan are unproven in practice.
 
 ## 8. Dependency posture
 
-`npm audit` at the time of scaffolding: **0 critical**, 6 high, 10 moderate — all
-transitive and all dev/test-path.
+`npm audit`, verified during the Phase 1 review:
 
-- `vitest`/`tinypool` criticals were removed by upgrading to vitest 5.
-- `postcss` is pinned forward via a root `overrides` entry.
-- `@grpc/grpc-js` (high) is pinned by the Firebase **client** SDK, which uses it
-  only in Node during rules tests; the advisory concerns gRPC server auth contexts.
-  The only "fix" npm offers is downgrading `firebase` to v9, which is not
-  acceptable. Tracked, re-checked each dependency bump, not shipped to users.
+```
+{ critical: 0, high: 6, moderate: 10, low: 0, info: 0, total: 16 }
+```
 
-Dependabot and a scheduled `npm audit` should be enabled when the repository goes
-active.
+All 16 are transitive and confined to build or test tooling. None ships to users.
+
+**Resolved**
+
+- `vitest` / `tinypool` — the two criticals were removed by upgrading to vitest 5.
+
+**Unresolved, accepted with reasons**
+
+| Advisory                                           | Why it is still here                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `postcss@8.4.31` (high)                            | **The root `overrides` entry did NOT fix this.** It hoisted the top-level copy to 8.5.32, but Next.js vendors its own copy at `node_modules/next/node_modules/postcss` which the override does not reach. npm's only offered fix is Next 16 — a major upgrade, out of scope. The advisory is an arbitrary file read via an attacker-controlled `sourceMappingURL` in CSS; our CSS is entirely first-party and compiled at build time, so there is no untrusted input path. |
+| `@grpc/grpc-js@1.9.16` (high, ×4 chained packages) | Pinned by the Firebase **client** SDK, which uses gRPC only in Node during rules tests. The advisory concerns gRPC **server** auth contexts. npm's only offered fix is downgrading `firebase` to v9, which is not acceptable.                                                                                                                                                                                                                                              |
+
+Neither reaches production: `postcss` runs only at build time, and the Firebase
+client SDK's Node gRPC path is exercised only by the test suite.
+
+**Gaps in the process itself**
+
+- CI does **not** run `npm audit` — these numbers come from manual checks.
+- No Dependabot configuration is committed.
+
+Both should be added before the repository goes active, so that regressions are
+caught automatically rather than at review time.
 
 ---
 
