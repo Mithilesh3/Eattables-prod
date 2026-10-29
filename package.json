@@ -2,7 +2,7 @@
   "name": "eattables",
   "version": "0.1.0",
   "private": true,
-  "description": "Eattables — premium healthy-food D2C e-commerce platform (Entais Retail Pvt. Ltd.)",
+  "description": "Eattables \u2014 premium healthy-food D2C e-commerce platform (Entais Retail Pvt. Ltd.)",
   "engines": {
     "node": ">=20"
   },
@@ -24,7 +24,9 @@
     "emulators": "firebase emulators:start --project=eattables-local",
     "emulators:exec": "firebase emulators:exec --project=eattables-local",
     "check:client-env": "node scripts/check-client-env.mjs",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run check:client-env && npm run test && npm run build"
+    "prebuild:shared": "npm run build --workspace=@eattables/shared",
+    "verify": "npm run prebuild:shared && npm run format:check && npm run lint && npm run typecheck && npm run check:client-env && npm run test && npm run build",
+    "test:e2e": "npm run test:e2e --workspace=@eattables/web"
   },
   "overrides": {
     "postcss": "^8.5.32"

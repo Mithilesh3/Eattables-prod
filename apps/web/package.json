@@ -2,13 +2,16 @@
   "name": "@eattables/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Eattables customer website and (later) admin panel — Next.js App Router.",
+  "description": "Eattables customer website and (later) admin panel \u2014 Next.js App Router.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@eattables/shared": "*",
@@ -19,6 +22,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.1.16",
     "@types/node": "^22.18.9",
     "@types/react": "^19.2.2",

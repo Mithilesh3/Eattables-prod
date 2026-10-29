@@ -6,6 +6,7 @@
  */
 
 export * from './types/common.js';
+export * from './types/catalog.js';
 export * from './core/money.js';
 export * from './core/orderStatus.js';
 export * from './schemas/index.js';

@@ -10,7 +10,15 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 const eslintConfig = [
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
   {
-    ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts'],
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'next-env.d.ts',
+      // Playwright's generated artefacts: the HTML report ships a bundled,
+      // minified trace viewer, and linting third-party build output is noise.
+      'playwright-report/**',
+      'test-results*/**',
+    ],
   },
   {
     rules: {

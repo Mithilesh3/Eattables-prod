@@ -84,6 +84,11 @@ Emulator Suite, and `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true` points the client 
 | `npm run format`           | Prettier write                                             |
 | `npm run verify`           | Everything CI runs, except the rules tests                 |
 
+`npm run verify` builds `@eattables/shared` first: the other workspaces typecheck
+against its emitted declarations, so without that step a clean checkout fails with
+`TS2307: Cannot find module '@eattables/shared'`. It therefore works straight after
+`npm ci`, with no manual pre-build.
+
 ## Environment and secrets
 
 - **Browser config** → `apps/web/.env.example` → copy to `.env.local`.

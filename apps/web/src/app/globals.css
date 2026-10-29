@@ -10,22 +10,63 @@
  * begins. Defining them in one place means that replacement is a single edit.
  */
 @theme {
+  /* Deep indigo — the deck's dominant brand colour. */
   --color-brand-50: #f4f3f8;
   --color-brand-100: #e4e1ee;
+  --color-brand-200: #c9c3dc;
+  --color-brand-300: #a79ec4;
+  --color-brand-400: #7a6ea3;
   --color-brand-500: #4a3d7a;
+  --color-brand-600: #3e3367;
   --color-brand-700: #332a58;
+  --color-brand-800: #2e2554;
   --color-brand-900: #2b2150;
+  --color-brand-950: #1d1636;
 
+  /* Amber / terracotta accent used for CTAs and highlights. */
+  --color-accent-50: #fdf6ef;
+  --color-accent-100: #f9e7d3;
+  --color-accent-200: #f2cda7;
+  --color-accent-300: #e8a765;
   --color-accent-400: #e8a765;
   --color-accent-500: #d9843a;
   --color-accent-600: #b86a28;
+  --color-accent-700: #93521f;
 
+  /* Warm neutrals — the deck's cream paper tone. */
   --color-cream-50: #fdfbf7;
   --color-cream-100: #f7f2e8;
+  --color-cream-200: #ece4d5;
 
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
+  /* Deep green, used sparingly for "in stock" / success. */
+  --color-leaf-50: #eef5f0;
+  --color-leaf-500: #2f6b46;
+  --color-leaf-600: #255738;
+
+  /* ---------------------------------------------------------------- type
+   * One font family for the entire site: Roboto, loaded once via next/font in
+   * app/layout.tsx. --font-roboto is the CSS variable that loader defines.
+   *
+   * Weight scale, applied consistently everywhere:
+   *   400  body text, descriptions, metadata
+   *   500  navigation, buttons, product titles, labels
+   *   600  section headings, prices, discount badges
+   *   700  main page headings
+   *
+   * Size scale (Tailwind defaults, mobile → desktop):
+   *   h1  text-3xl → text-5xl      h2  text-xl → text-2xl
+   *   h3  text-base → text-lg      body text-sm / text-base
+   *   meta text-xs (0.75rem) — the smallest size used for readable content.
+   */
+  --font-sans: var(--font-roboto), Arial, Helvetica, sans-serif;
+
+  /* Reserved for the Eattables wordmark and the monogram marks derived from it.
+   * This is brand identity, not UI text, so it deliberately does NOT follow the
+   * Roboto rule above. Never use it for headings or body copy. */
+  --font-wordmark: ui-serif, Georgia, Cambria, 'Times New Roman', serif;
+
+  --shadow-card: 0 1px 2px rgb(43 33 80 / 0.06), 0 8px 24px -12px rgb(43 33 80 / 0.18);
+  --shadow-raised: 0 2px 4px rgb(43 33 80 / 0.08), 0 16px 40px -16px rgb(43 33 80 / 0.28);
 }
 
 :root {
@@ -36,16 +77,73 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/*
+ * Every element inherits the one font family. Setting it here — rather than per
+ * component — is what guarantees that pages added later (product details, cart,
+ * checkout, account, admin) pick up the same typography with no extra work.
+ */
 body {
   background-color: var(--color-cream-50);
   color: var(--color-brand-900);
   font-family: var(--font-sans);
+  font-style: normal;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings inherit the body family; only size and weight distinguish them.
+   Tighter leading keeps multi-line headings from looking loose. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: inherit;
+  font-style: normal;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+/* Form controls do not inherit font by default in any browser. Without this,
+   the search box, address fields and checkout inputs fall back to the system
+   UI font and visibly break the type system. */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Prices and quantities use tabular figures so digits align in carts, order
+   summaries and invoices instead of jittering as values change. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Visible keyboard focus is an accessibility requirement, not a style choice. */
 :focus-visible {
   outline: 2px solid var(--color-accent-500);
   outline-offset: 2px;
+}
+
+/* Hides the horizontal scrollbar on product rails without disabling scrolling. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Clamp helpers for card copy, so cards in a row keep equal heights. */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {

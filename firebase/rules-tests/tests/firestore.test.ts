@@ -508,9 +508,11 @@ describe('separation of duty', () => {
     await assertFails(getDoc(doc(suspendedOps, 'inventory/EAT-DF-ALM-500G')));
   });
 
-  it('BLOCKS a forged perms claim from a customer', async () => {
-    // Claims are set only by a superadmin callable; this proves the rule reads
-    // the token rather than anything the user controls in Firestore.
+  it('BLOCKS a customer writing a perms field to their own user document', async () => {
+    // Scope: this asserts only that the users/{uid} key allowlist rejects a
+    // `perms` field. It does NOT test ID-token claim forgery — authorization
+    // reads request.auth.token, which Firestore rules cannot influence and this
+    // suite cannot exercise. Forging a token is an Auth-layer concern.
     await assertFails(
       updateDoc(doc(alice(), 'users', ALICE), { perms: ['orders:read'] })
     );

@@ -1,55 +1,65 @@
+import { CategoryGrid } from '@/components/home/CategoryGrid';
+import { GiftingBanner } from '@/components/home/GiftingBanner';
+import { Hero } from '@/components/home/Hero';
+import { HowItWorks } from '@/components/home/HowItWorks';
+import { ProductRail } from '@/components/home/ProductRail';
+import { ValueProps } from '@/components/home/ValueProps';
+import { DemoDataNotice } from '@/components/layout/DemoDataNotice';
+import {
+  getBestsellers,
+  getCategories,
+  getFeaturedProducts,
+  isDemoCatalog,
+} from '@/lib/catalog/source';
+
 /**
- * Phase 1 placeholder.
+ * Homepage — a server component.
  *
- * This page exists to prove the toolchain renders and builds. It contains no
- * storefront, no product data and no prices — the catalogue arrives in Phase 2,
- * and no price may be shown until the business owner supplies real ones.
+ * Catalogue data is fetched on the server so the page is server-rendered for
+ * SEO, which the go-to-market plan depends on. Each section renders its own
+ * empty state, so an unpublished catalogue degrades gracefully instead of
+ * leaving holes in the layout.
  */
-export default function Home() {
-  const checklist = [
-    'Next.js App Router + TypeScript + Tailwind CSS',
-    'Monorepo: apps/web, packages/shared, functions',
-    'Firebase Emulator Suite configuration',
-    'Firestore + Storage rules with default-deny',
-    'Automated Security Rules tests',
-    'CI: lint, typecheck, test, build, secret scanning',
-  ];
+export default async function HomePage() {
+  const [categories, featured, bestsellers] = await Promise.all([
+    getCategories(),
+    getFeaturedProducts(4),
+    getBestsellers(4),
+  ]);
+
+  const usingDemoData =
+    isDemoCatalog(categories.source) || isDemoCatalog(featured.source);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-8 px-6 py-16">
-      <header className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">
-          Health · Wealth · Care
-        </p>
-        <h1 className="text-4xl font-bold tracking-tight text-brand-900">Eattables</h1>
-        <p className="text-brand-700">
-          Platform scaffold — Phase 1 of the MVP build. The storefront, checkout and admin
-          panel are not implemented yet.
-        </p>
-      </header>
+    <>
+      {usingDemoData ? <DemoDataNotice /> : null}
 
-      <section
-        aria-labelledby="phase-1-heading"
-        className="rounded-xl border border-brand-100 bg-white p-6 shadow-sm"
-      >
-        <h2 id="phase-1-heading" className="text-sm font-semibold text-brand-900">
-          Phase 1 scope
-        </h2>
-        <ul className="mt-4 space-y-2 text-sm text-brand-700">
-          {checklist.map((item) => (
-            <li key={item} className="flex gap-3">
-              <span aria-hidden="true" className="text-accent-500">
-                ✓
-              </span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <Hero />
 
-      <footer className="text-xs text-brand-500">
-        Eattables — a brand by Entais Retail Pvt. Ltd.
-      </footer>
-    </main>
+      {/* Categories come first after the hero: browsing by category is the
+          easiest path for someone who does not know what to search for. */}
+      <CategoryGrid categories={categories.items} />
+
+      <ProductRail
+        title="Bestsellers"
+        description="The staples our customers reorder most."
+        items={bestsellers.items}
+        viewAllHref="/products?tag=bestseller"
+        className="bg-cream-100"
+      />
+
+      <HowItWorks />
+
+      <ProductRail
+        title="Featured this season"
+        description="A curated selection from across the Eattables range."
+        items={featured.items}
+        viewAllHref="/products"
+      />
+
+      <GiftingBanner />
+
+      <ValueProps />
+    </>
   );
 }
